@@ -1,0 +1,28 @@
+Unit : Type;
+Unit = {unit};
+
+unit : Unit;
+unit = :unit;
+
+Nat : Type;
+Nat =
+  (l: {zero succ}) *> match l {
+    |zero| Unit;
+    |succ| Nat;
+  };
+
+zero : Nat;
+zero = :zero, unit;
+
+succ : Nat -> Nat;
+succ = a => :succ, a;
+
+add : Nat -> Nat -> Nat;
+add = a => b =>
+  split a {|l, n| match l {
+    |zero| b;
+    |succ| succ (add n b);
+  }};
+
+start : Nat;
+start = add (succ zero) (succ (succ zero));

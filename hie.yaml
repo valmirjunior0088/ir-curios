@@ -1,0 +1,10 @@
+cradle:
+  stack:
+    - path: "./src"
+      component: "ir-curios:lib"
+
+    - path: "./app/Main.hs"
+      component: "ir-curios:exe:ir-curios-exe"
+
+    - path: "./app/Paths_ir_curios.hs"
+      component: "ir-curios:exe:ir-curios-exe"
