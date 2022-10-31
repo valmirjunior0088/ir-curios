@@ -86,12 +86,12 @@ end
 
 block add_1 [4, 1] do
   6 <- block.call succ [];
-  10 <- block.call add [];
-  11 <- pure [Local "4"];
-  8 <- closure.enter [Local "10"] [Local "11"];
-  9 <- pure [Local "1"];
-  7 <- closure.enter [Local "8"] [Local "9"];
-  closure.enter [Local "6"] [Local "7"]
+  7 <- block.call add [];
+  8 <- pure [Local "4"];
+  9 <- closure.enter [Local "7"] [Local "8"];
+  10 <- pure [Local "1"];
+  11 <- closure.enter [Local "9"] [Local "10"];
+  closure.enter [Local "6"] [Local "11"]
 end
 
 block add [] do
@@ -99,16 +99,16 @@ block add [] do
 end
 
 block start [] do
-  2 <- block.call add [];
-  4 <- block.call succ [];
-  5 <- block.call zero [];
-  3 <- closure.enter [Local "4"] [Local "5"];
-  0 <- closure.enter [Local "2"] [Local "3"];
+  0 <- block.call add [];
+  1 <- block.call succ [];
+  2 <- block.call zero [];
+  3 <- closure.enter [Local "1"] [Local "2"];
+  4 <- closure.enter [Local "0"] [Local "3"];
+  5 <- block.call succ [];
   6 <- block.call succ [];
-  8 <- block.call succ [];
-  9 <- block.call zero [];
-  7 <- closure.enter [Local "8"] [Local "9"];
-  1 <- closure.enter [Local "6"] [Local "7"];
-  closure.enter [Local "0"] [Local "1"]
+  7 <- block.call zero [];
+  8 <- closure.enter [Local "6"] [Local "7"];
+  9 <- closure.enter [Local "5"] [Local "8"];
+  closure.enter [Local "4"] [Local "9"]
 end
 ```

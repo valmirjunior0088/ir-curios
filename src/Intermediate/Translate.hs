@@ -91,7 +91,7 @@ getLabel name = do
       (the @"labels") %= ((name, label) :)
 
       return label
-    
+
     Just label ->
       return label
 
@@ -141,7 +141,7 @@ translateFunction scope = do
     environmentals = [(variable, Environmental variable) | variable <- variables]
     locals = [(parameter, Local parameter)]
     dictionary = environmentals ++ locals
-  
+
   body <- withDictionary dictionary (translateTerm output)
   pushClosure closure variables [parameter] body
 
@@ -150,10 +150,10 @@ translateFunction scope = do
 
 translateApply :: Term -> Term -> Translate Sequence
 translateApply function argument = do
-  functionName <- freshName
-  argumentName <- freshName
   functionSequence <- translateTerm function
+  functionName <- freshName
   argumentSequence <- translateTerm argument
+  argumentName <- freshName
 
   let
     bindFunction = bind functionName functionSequence
@@ -164,29 +164,29 @@ translateApply function argument = do
 
 translatePair :: Term -> Term -> Translate Sequence
 translatePair left right = do
-  leftName <- freshName
-  rightName <- freshName
   leftSequence <- translateTerm left
+  leftName <- freshName
   rightSequence <- translateTerm right
+  rightName <- freshName
 
   let
     bindLeft = bind leftName leftSequence
     bindRight = bind rightName rightSequence
     tailSequence = Tail (StructAlloc [Local leftName, Local rightName])
-  
+
   return (bindLeft $ bindRight tailSequence)
 
 translateSplit :: Term -> Scope (Scope Term) -> Translate Sequence
 translateSplit scrutinee scope = do
+  scrutineeSequence <- translateTerm scrutinee
   scrutineeName <- freshName
   leftName <- freshName
   rightName <- freshName
-  scrutineeSequence <- translateTerm scrutinee
 
   let
     dictionary = [(leftName, Local leftName), (rightName, Local rightName)]
     output = open rightName (open leftName scope)
-    
+
     bindScrutinee = bind scrutineeName scrutineeSequence
     bindLeft = Bind leftName (StructSelect (Local scrutineeName) 0)
     bindRight = Bind rightName (StructSelect (Local scrutineeName) 1)
@@ -199,16 +199,16 @@ translateLabel name = Tail . Int32Alloc <$> getLabel name
 
 translateMatch :: Term -> [(String, Term)] -> Translate Sequence
 translateMatch scrutinee branches = do
-  scrutineeName <- freshName
   scrutineeSequence <- translateTerm scrutinee
+  scrutineeName <- freshName
 
   branchesSequences <- forM branches $ \(name, branch) -> do
     let
       variables = free branch
       dictionary = [(variable, Local variable) | variable <- variables]
 
-    block <- freshBlock
     branchSequence <- withDictionary dictionary (translateTerm branch)
+    block <- freshBlock
     pushBlock block variables branchSequence
 
     label <- getLabel name
