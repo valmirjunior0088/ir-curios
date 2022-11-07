@@ -3,115 +3,57 @@ module Intermediate.Debug
   )
   where
 
-import Prelude hiding ((<>))
-
-import Intermediate.Syntax (Expression (..), Sequence (..), Closure (..), Block (..), Program)
-import Text.PrettyPrint.Boxes (Box, emptyBox, text, (<>), (//), hcat, top, vcat, left, render)
+import Intermediate.Syntax (Expression (..), Sequence (..), Closure (..), Block (..), Program (..))
 import Data.List (intercalate)
 import Data.Int (Int32)
-import Data.Generics.Product (the)
-import Control.Lens ((^.))
 
-debugBranch :: Int32 -> Expression -> Box
-debugBranch label branch =
-  text "|" <> text (show label) <> text "| " <> debugExpression branch <> text " "
+debugBranch :: (Int32, Expression) -> String
+debugBranch (label, expression) = "|" ++ show label ++ "| " ++ debugExpression expression
 
-debugExpression :: Expression -> Box
+debugExpression :: Expression -> String
 debugExpression = \case
-  Int32Alloc value -> text "int32.alloc "
-    <> text (show value)
+  Int32Alloc value -> "int32.alloc " ++ show value
+  Int32Add one other -> "int32.add [" ++ show one ++ ", " ++ show other ++ "]"
+  Flt32Alloc value -> "flt32.alloc " ++ show value
+  Flt32Add one other -> "flt32.add [" ++ show one ++ ", " ++ show other ++ "]"
+  Pure atom -> "pure [" ++ show atom ++ "]"
+  BlockCall block atoms -> "block.call " ++ block ++ " [" ++ intercalate ", " (map show atoms) ++ "]"
+  Int32Match atom branches -> "int32.match [" ++ show atom ++ "]: " ++ unwords (map debugBranch branches)
+  ClosureAlloc closure atoms -> "closure.alloc " ++ closure ++ " {" ++ intercalate ", " (map show atoms) ++ "}"
+  ClosureEnter atom atoms -> "closure.enter [" ++ show atom ++ "] [" ++ intercalate ", " (map show atoms) ++ "]"
+  StructAlloc atoms -> "struct.alloc [" ++ intercalate ", " (map show atoms) ++ "]"
+  StructSelect atom index -> "struct.select [" ++ show atom ++ "] " ++ show index
 
-  Int32Add one other -> text "int32.add ["
-    <> text (show one)
-    <> text ", "
-    <> text (show other)
-    <> text "]"
-
-  Flt32Alloc value -> text "flt32.alloc "
-    <> text (show value)
-
-  Flt32Add one other -> text "flt32.add ["
-    <> text (show one)
-    <> text ", "
-    <> text (show other)
-    <> text "]"
-
-  Pure atom -> text "pure ["
-    <> text (show atom)
-    <> text "]"
-
-  BlockCall block atoms -> text "block.call "
-    <> text block
-    <> text " ["
-    <> text (intercalate ", " $ map show atoms)
-    <> text "]"
-
-  Int32Match atom branches -> text "int32.match ["
-    <> text (show atom)
-    <> text "]: "
-    <> hcat top [debugBranch label branch | (label, branch) <- branches]
-
-  ClosureAlloc closure atoms -> text "closure.alloc "
-    <> text closure
-    <> text " {"
-    <> text (intercalate ", " $ map show atoms)
-    <> text "}"
-
-  ClosureEnter atom atoms -> text "closure.enter ["
-    <> text (show atom)
-    <> text "] ["
-    <> text (intercalate ", " $ map show atoms)
-    <> text "]"
-
-  StructAlloc atoms -> text "struct.alloc ["
-    <> text (intercalate ", " $ map show atoms)
-    <> text "]"
-
-  StructSelect atom index -> text "struct.select ["
-    <> text (show atom)
-    <> text "] "
-    <> text (show index)
-
-debugSequence :: Sequence -> Box
+debugSequence :: Sequence -> [String]
 debugSequence = \case
-  Bind name body rest -> do
-    let
-      branchBox = text name <> text " <- " <> debugExpression body <> text ";"
-      restBox = debugSequence rest
+  Bind name body rest -> (name ++ " <- " ++ debugExpression body ++ ";") : debugSequence rest
+  Tail body -> [debugExpression body]
 
-    branchBox // restBox
+debugBody :: Sequence -> String
+debugBody body = intercalate "\n" $ map ("  " ++) $ debugSequence body
 
-  Tail body ->
-    debugExpression body
-
-debugClosure :: String -> Closure -> Box
-debugClosure name Closure { environment, parameters, body } = do
+debugClosure :: (String, Closure) -> String
+debugClosure (name, Closure { environment, parameters, body }) = do
   let
-    environmentBox = text " {" <> text (intercalate ", " environment) <> text "}"
-    parametersBox = text " [" <> text (intercalate ", " parameters) <> text "]"
-    headerBox = text "closure " <> text name <> environmentBox <> parametersBox <> text " do"
-    bodyBox = emptyBox 1 2 <> debugSequence body
-    footerBox = text "end" // emptyBox 1 1
+    environmentString = "{" ++ intercalate ", " environment ++ "}"
+    parametersString = "[" ++ intercalate ", " parameters ++ "]"
+    bodyString = "do\n" ++ debugBody body ++ "\nend"
 
-  headerBox // bodyBox // footerBox
+  "closure " ++ name ++ " "
+    ++ environmentString ++ " "
+    ++ parametersString ++ " "
+    ++ bodyString
 
-debugBlock :: String -> Block -> Box
-debugBlock name Block { parameters, body } = do
+debugBlock :: (String, Block) -> String
+debugBlock (name, Block { parameters, body }) = do
   let
-    parametersBox = text " [" <> text (intercalate ", " parameters) <> text "]"
-    headerBox = text "block " <> text name <> parametersBox <> text " do"
-    bodyBox = emptyBox 1 2 <> debugSequence body
-    footerBox = text "end" // emptyBox 1 1
+    parametersString = "[" ++ intercalate ", " parameters ++ "]"
+    bodyString = "do\n" ++ debugBody body ++ "\nend"
 
-  headerBox // bodyBox // footerBox
-
-debugProgram :: Program -> Box
-debugProgram program = do
-  let
-    closures = [debugClosure name closure | (name, closure) <- program ^. the @"closures"]
-    blocks = [debugBlock name block | (name, block) <- program ^. the @"blocks"]
-
-  vcat left closures // vcat left blocks
+  "block " ++ name ++ " "
+    ++ parametersString ++ " "
+    ++ bodyString
 
 debug :: Program -> String
-debug program = render (debugProgram program)
+debug Program { closures, blocks } =
+  intercalate "\n\n" (map debugClosure closures ++ map debugBlock blocks)

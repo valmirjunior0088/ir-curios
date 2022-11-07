@@ -16,7 +16,6 @@ dependencies:
 - mtl >= 2.2 && < 3
 - bytestring >= 0.10 && < 1
 - megaparsec >= 9.2 && < 10
-- boxes >= 0.1 && < 1
 
 # Lens specific dependencies
 - lens >= 5.0 && < 6

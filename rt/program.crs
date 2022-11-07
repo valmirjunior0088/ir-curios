@@ -4,6 +4,26 @@ Unit = {unit};
 unit : Unit;
 unit = :unit;
 
+List : Type -> Type;
+List = A =>
+  (label: {null cons}) *> match label {
+    |null| Unit;
+    |cons| A *> List A;
+  };
+
+null : (A: Type) -> List A;
+null = A => :null, unit;
+
+cons : (A: Type) -> A -> List A -> List A;
+cons = A => a => rest => :cons, a, rest;
+
+foldl : (A: Type) -> (B: Type) -> (B -> A -> B) -> B -> List A -> B;
+foldl = A => B => action => initial => list =>
+  split list {|label, list| match label {
+    |null| initial;
+    |cons| split list {|a, rest| foldl A B action (action initial a) rest};
+  }};
+
 Nat : Type;
 Nat =
   (l: {zero succ}) *> match l {
