@@ -221,6 +221,41 @@ translateMatch scrutinee branches = do
 
   return (bindScrutinee tailSequence)
 
+translatePrimitive :: Core.Primitive -> Translate Sequence
+translatePrimitive = \case
+  Core.Int32 value -> return (Tail $ Int32Alloc value)
+  Core.Flt32 value -> return (Tail $ Flt32Alloc value)
+
+translateOperate :: Core.Operation -> [Core.Term] -> Translate Sequence
+translateOperate operation parameters = case (operation, parameters) of
+  (Core.Int32Add, [one, other]) -> do
+    oneSequence <- translateTerm one
+    oneName <- freshName
+    otherSequence <- translateTerm other
+    otherName <- freshName
+
+    let
+      bindOne = bind oneName oneSequence
+      bindOther = bind otherName otherSequence
+      tailSequence = Tail (Int32Add (Local oneName) (Local otherName))
+
+    return (bindOne $ bindOther tailSequence)
+
+  (Core.Flt32Add, [one, other]) -> do
+    oneSequence <- translateTerm one
+    oneName <- freshName
+    otherSequence <- translateTerm other
+    otherName <- freshName
+
+    let
+      bindOne = bind oneName oneSequence
+      bindOther = bind otherName otherSequence
+      tailSequence = Tail (Flt32Add (Local oneName) (Local otherName))
+
+    return (bindOne $ bindOther tailSequence)
+
+  _ -> error "invalid format operation"
+
 translateTerm :: Term -> Translate Sequence
 translateTerm = \case
   Core.Global name -> translateGlobal name
@@ -235,6 +270,9 @@ translateTerm = \case
   Core.LabelType _ -> translateNull
   Core.Label name -> translateLabel name
   Core.Match scrutinee branches -> translateMatch scrutinee branches
+  Core.PrimitiveType _ -> translateNull
+  Core.Primitive primitive -> translatePrimitive primitive
+  Core.Operate operation parameters -> translateOperate operation parameters
 
 pushDefinition :: (String, Term) -> Translate ()
 pushDefinition (name, term) = do

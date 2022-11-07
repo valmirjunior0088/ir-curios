@@ -17,16 +17,16 @@ null = A => :null, unit;
 cons : (A: Type) -> A -> List A -> List A;
 cons = A => a => rest => :cons, a, rest;
 
-foldl : (A: Type) -> (B: Type) -> (B -> A -> B) -> B -> List A -> B;
-foldl = A => B => action => initial => list =>
+fold : (A: Type) -> (B: Type) -> (B -> A -> B) -> B -> List A -> B;
+fold = A => B => action => initial => list =>
   split list {|label, list| match label {
     |null| initial;
-    |cons| split list {|a, rest| foldl A B action (action initial a) rest};
+    |cons| split list {|a, rest| fold A B action (action initial a) rest};
   }};
 
 Nat : Type;
 Nat =
-  (l: {zero succ}) *> match l {
+  (label: {zero succ}) *> match label {
     |zero| Unit;
     |succ| Nat;
   };
@@ -35,14 +35,36 @@ zero : Nat;
 zero = :zero, unit;
 
 succ : Nat -> Nat;
-succ = a => :succ, a;
+succ = value => :succ, value;
 
 add : Nat -> Nat -> Nat;
-add = a => b =>
-  split a {|l, n| match l {
-    |zero| b;
-    |succ| succ (add n b);
+add = one => other =>
+  split one {|label, one| match label {
+    |zero| other;
+    |succ| succ (add one other);
   }};
 
-start : Nat;
-start = add (succ zero) (succ (succ zero));
+one : Nat;
+one = succ zero;
+
+two : Nat;
+two = succ one;
+
+three : Nat;
+three = succ two;
+
+nat_list : List Nat;
+nat_list = cons Nat one (cons Nat two (cons Nat three (null Nat)));
+
+folded_nat_list : Nat;
+folded_nat_list = fold Nat Nat add zero nat_list;
+
+to_int32 : Nat -> Int32;
+to_int32 = value =>
+  split value {|label, value| match label {
+    |zero| 0;
+    |succ| [int32.add 1 (to_int32 value)];
+  }};
+
+start : Int32;
+start = to_int32 folded_nat_list;

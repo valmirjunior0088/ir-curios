@@ -3,15 +3,24 @@ module Core.Check
   )
   where
 
-import Core.Syntax (Variable (..), unwrap, Type, Term, instantiate, open)
-import qualified Core.Syntax as Syntax
+import Core.Syntax
+  ( Variable (..)
+  , unwrap
+  , PrimitiveType (..)
+  , Primitive (..)
+  , Operation (..)
+  , Type
+  , Term (..)
+  , instantiate
+  , open
+  )
 
 import Core.Bindings (Bindings)
 import qualified Core.Bindings as Bindings
 
 import Util ((!!!), unique, (<==>), (.&&.))
 import Data.Functor ((<&>))
-import Control.Monad (unless)
+import Control.Monad (unless, zipWithM)
 import Control.Monad.State (MonadState (..), StateT, evalStateT)
 import Control.Monad.Except (MonadError (..), Except, runExcept)
 import GHC.Generics (Generic)
@@ -54,32 +63,32 @@ fresh = do
 
 reduce :: Term -> Check Term
 reduce = \case
-  Syntax.Global name -> do
+  Global name -> do
     definition <- Bindings.definition name <$> use (the @"globals")
-    
+
     case definition of
       Just term -> reduce term
-      _ -> return (Syntax.Global name)
-  
-  Syntax.Local variable -> do
+      _ -> return (Global name)
+
+  Local variable -> do
     definition <- Bindings.definition (unwrap variable) <$> use (the @"locals")
-    
+
     case definition of
       Just term -> reduce term
-      _ -> return (Syntax.Local variable)
+      _ -> return (Local variable)
 
-  Syntax.Apply function argument -> reduce function >>= \case
-    Syntax.Function body -> reduce (instantiate argument body)
-    _ -> return (Syntax.Apply function argument)
+  Apply function argument -> reduce function >>= \case
+    Function body -> reduce (instantiate argument body)
+    _ -> return (Apply function argument)
 
-  Syntax.Split scrutinee body -> reduce scrutinee >>= \case
-    Syntax.Pair left right -> reduce (instantiate right (instantiate left body))
-    _ -> return (Syntax.Split scrutinee body)
+  Split scrutinee body -> reduce scrutinee >>= \case
+    Pair left right -> reduce (instantiate right (instantiate left body))
+    _ -> return (Split scrutinee body)
 
-  Syntax.Match scrutinee branches -> reduce scrutinee >>= \case
-    Syntax.Label label -> reduce (label !!! branches)
-    _ -> return (Syntax.Match scrutinee branches)
-  
+  Match scrutinee branches -> reduce scrutinee >>= \case
+    Label label -> reduce (label !!! branches)
+    _ -> return (Match scrutinee branches)
+
   term -> return term
 
 equals :: [(Term, Term)] -> Term -> Term -> Check Bool
@@ -93,7 +102,7 @@ equals history one other = do
     go = equals ((one', other') : history)
 
   if isEqual || isRemembered then return True else case (one', other') of
-    (Syntax.FunctionType input scope, Syntax.FunctionType input' scope') -> do
+    (FunctionType input scope, FunctionType input' scope') -> do
       name <- fresh
 
       let
@@ -102,7 +111,7 @@ equals history one other = do
 
       go input input' .&&. go output output'
 
-    (Syntax.Function body, Syntax.Function body') -> do
+    (Function body, Function body') -> do
       name <- fresh
 
       let
@@ -110,11 +119,11 @@ equals history one other = do
         output' = open name body'
 
       go output output'
-    
-    (Syntax.Apply function argument, Syntax.Apply function' argument') ->
+
+    (Apply function argument, Apply function' argument') ->
       go function function' .&&. go argument argument'
-    
-    (Syntax.PairType input scope, Syntax.PairType input' scope') -> do
+
+    (PairType input scope, PairType input' scope') -> do
       name <- fresh
 
       let
@@ -122,11 +131,11 @@ equals history one other = do
         output' = open name scope'
 
       go input input' .&&. go output output'
-    
-    (Syntax.Pair left right, Syntax.Pair left' right') ->
+
+    (Pair left right, Pair left' right') ->
       go left left' .&&. go right right'
-    
-    (Syntax.Split scrutinee body, Syntax.Split scrutinee' body') -> do
+
+    (Split scrutinee body, Split scrutinee' body') -> do
       left <- fresh
       right <- fresh
 
@@ -136,7 +145,7 @@ equals history one other = do
 
       go scrutinee scrutinee' .&&. go output output'
 
-    (Syntax.Match scrutinee branches, Syntax.Match scrutinee' branches') -> do
+    (Match scrutinee branches, Match scrutinee' branches') -> do
       let
         labelsAreEqual = map fst branches <==> map fst branches'
 
@@ -147,7 +156,14 @@ equals history one other = do
         bodiesAreEqual = and <$> mapM (`contains` branches) branches'
 
       go scrutinee scrutinee' .&&. pure labelsAreEqual .&&. bodiesAreEqual
-    
+
+    (Operate operation parameters, Operate operation' parameters') -> do
+      let
+        operationsAreEqual = operation == operation'
+        parametersAreEqual = and <$> zipWithM go parameters parameters'
+
+      pure operationsAreEqual .&&. parametersAreEqual
+
     (_, _) -> return False
 
 equal :: Term -> Term -> Check Bool
@@ -165,116 +181,134 @@ constrain name term = do
 
 infers :: Term -> Check Type
 infers = \case
-  Syntax.Global name -> do
+  Global name -> do
     declaration <- Bindings.declaration name <$> use (the @"globals")
 
     case declaration of
       Nothing -> throwError ("unknown global `" ++ name ++ "`")
       Just tipe -> return tipe
 
-  Syntax.Local variable -> do
+  Local variable -> do
     declaration <- Bindings.declaration (unwrap variable) <$> use (the @"locals")
 
     case declaration of
       Nothing -> error "unknown local variable -- should not happen"
       Just tipe -> return tipe
 
-  Syntax.Type -> return Syntax.Type
+  Type -> return Type
 
-  Syntax.FunctionType input scope -> region $ do
-    checks Syntax.Type input
-    
+  FunctionType input scope -> region $ do
+    checks Type input
+
     name <- bind input
-    checks Syntax.Type (open name scope)
+    checks Type (open name scope)
 
-    return Syntax.Type
+    return Type
 
-  Syntax.Function _ -> throwError "functions don't have an inferable type"
+  Function _ -> throwError "functions don't have an inferable type"
 
-  Syntax.Apply function argument -> infers function >>= reduce >>= \case
-    Syntax.FunctionType input scope -> do
-      checks input argument 
+  Apply function argument -> infers function >>= reduce >>= \case
+    FunctionType input scope -> do
+      checks input argument
       return (instantiate argument scope)
-    
+
     _ -> throwError "function application type mismatch"
 
-  Syntax.PairType input scope -> region $ do
-    checks Syntax.Type input 
+  PairType input scope -> region $ do
+    checks Type input
 
     name <- bind input
-    checks Syntax.Type (open name scope) 
+    checks Type (open name scope)
 
-    return Syntax.Type
+    return Type
 
-  Syntax.Pair _ _ -> throwError "pairs don't have an inferable type"
+  Pair _ _ -> throwError "pairs don't have an inferable type"
 
-  Syntax.Split _ _ -> throwError "split expressions don't have an inferable type"
+  Split _ _ -> throwError "split expressions don't have an inferable type"
 
-  Syntax.LabelType set -> do
+  LabelType set -> do
     unless (unique set) (throwError "label type has repeated labels")
-    return Syntax.Type
+    return Type
 
-  Syntax.Label _ -> throwError "labels don't have an inferable type"
+  Label _ -> throwError "labels don't have an inferable type"
 
-  Syntax.Match _ _ -> throwError "match expressions don't have an inferable type"
+  Match _ _ -> throwError "match expressions don't have an inferable type"
+
+  PrimitiveType _ -> return Type
+
+  Primitive primitive -> case primitive of
+    Int32 _ -> return (PrimitiveType Int32Type)
+    Flt32 _ -> return (PrimitiveType Flt32Type)
+
+  Operate Int32Add [one, other] -> do
+    checks (PrimitiveType Int32Type) one
+    checks (PrimitiveType Int32Type) other
+    return (PrimitiveType Int32Type)
+
+  Operate Flt32Add [one, other] -> do
+    checks (PrimitiveType Flt32Type) one
+    checks (PrimitiveType Flt32Type) other
+    return (PrimitiveType Flt32Type)
+
+  Operate _ _ -> throwError "invalid operation format"
 
 checks :: Type -> Term -> Check ()
 checks tipe = \case
-  Syntax.Function body -> reduce tipe >>= \case
-    Syntax.FunctionType input scope -> region $ do
+  Function body -> reduce tipe >>= \case
+    FunctionType input scope -> region $ do
       name <- bind input
       checks (open name scope) (open name body)
-    
+
     _ -> throwError "function type mismatch"
-  
-  Syntax.Pair left right -> reduce tipe >>= \case
-    Syntax.PairType input scope -> do
+
+  Pair left right -> reduce tipe >>= \case
+    PairType input scope -> do
       checks input left
       checks (instantiate left scope) right
-    
+
     _ -> throwError "pair type mismatch"
-  
-  Syntax.Split scrutinee body -> infers scrutinee >>= reduce >>= \case
-    Syntax.PairType input scope -> region $ do
+
+  Split scrutinee body -> infers scrutinee >>= reduce >>= \case
+    PairType input scope -> region $ do
       left <- bind input
       right <- bind (open left scope)
 
       reduce scrutinee >>= \case
-        Syntax.Local variable -> constrain (unwrap variable) pair where
-          leftComponent = Syntax.Local (Free left)
-          rightComponent = Syntax.Local (Free right)
-          pair = Syntax.Pair leftComponent rightComponent
+        Local variable -> constrain (unwrap variable) pair where
+          leftComponent = Local (Free left)
+          rightComponent = Local (Free right)
+          pair = Pair leftComponent rightComponent
 
         _ -> return ()
-      
+
       checks tipe (open right (open left body))
-      
+
     _ -> throwError "split expression scrutinee type mismatch"
-  
-  Syntax.Label label -> reduce tipe >>= \case
-    Syntax.LabelType labels ->
+
+  Label label -> reduce tipe >>= \case
+    LabelType labels ->
       unless (label `elem` labels) (throwError "label does not belong to label type")
-    
+
     _ -> throwError "label type mismatch"
-  
-  Syntax.Match scrutinee branches -> do
+
+  Match scrutinee branches -> do
     let labels = map fst branches
 
     unless (unique labels)
       (throwError "match expression has repeated branch labels")
-    
+
     infers scrutinee >>= reduce >>= \case
-      Syntax.LabelType set -> do
+      LabelType set -> do
         unless (labels <==> set)
           (throwError "match expression branch labels do not match scrutinee label type")
-        
+
         go <- reduce scrutinee <&> \case
-          Syntax.Local variable -> \(label, body) -> region $ do
-            constrain (unwrap variable) (Syntax.Label label)
+          Local variable -> \(label, body) -> region $ do
+            constrain (unwrap variable) (Label label)
             checks tipe body
-          
+
           _ -> \(_, body) -> checks tipe body
-        
+
         mapM_ go branches
 
       _ -> throwError "match expression scrutinee type mismatch"

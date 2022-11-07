@@ -183,7 +183,7 @@ pushInt32Match name atom branches = do
 
   forM_ [label | (label, _) <- reverse branches] $ \label -> do
     pushBlock ("case-" ++ show label) [] []
-  
+
   pushAtomGet atom
   pushCall "trunk"
   pushI32Load MemArg { alignment = 2, offset = 0 }
@@ -194,7 +194,7 @@ pushInt32Match name atom branches = do
     pushI32Const label
     pushI32Eq
     pushBrIf ("case-" ++ show label)
-  
+
   pushUnreachable
 
   forM_ [branch | (_, branch) <- branches] $ \branch -> do
@@ -203,7 +203,7 @@ pushInt32Match name atom branches = do
     forM_ (mentions branch) $ \mention -> do
       pushAtomGet mention
       pushCall "enter"
-    
+
     pushExpression name branch
     pushBr "exit"
 
@@ -277,14 +277,14 @@ pushSequence = \case
       (Environmental variable, _) -> do
         pushEnvironmentalGet variable
         pushCall "enter"
-      
+
       (Local variable, rest) | Local variable `elem` rest  -> do
         pushLocalGet variable
         pushCall "enter"
-      
+
       (_, _) ->
         return ()
-    
+
     case body of
       Pure atom -> do
         return atom
@@ -293,22 +293,22 @@ pushSequence = \case
         pushLocal "return" i32
         pushExpression "return" body
         return (Local "return")
-  
+
   Bind name body rest -> do
     unless (rest `consumes` name) (pushCleanup name)
-  
+
     forM_ (decompose $ mentions body) $ \case
       (Environmental variable, _) -> do
         pushEnvironmentalGet variable
         pushCall "enter"
-      
+
       (Local variable, atoms) | Local variable `elem` atoms || rest `consumes` variable  -> do
         pushLocalGet variable
         pushCall "enter"
-      
+
       (_, _) ->
         return ()
-    
+
     pushLocal name i32
     pushExpression name body
     pushSequence rest
@@ -318,7 +318,7 @@ declareClosure (name, Closure { parameters }) = do
   let
     inputs = ("self", i32) : [(parameter, i32) | parameter <- parameters]
     outputs = [i32]
-  
+
   declareFunc ("_closure_" ++ name) inputs outputs
 
 declareBlock :: (String, Block) -> Construct ()
@@ -326,7 +326,7 @@ declareBlock (name, Block { parameters }) = do
   let
     inputs = [(parameter, i32) | parameter <- parameters]
     outputs = [i32]
-  
+
   declareFunc ("_block_" ++ name) inputs outputs
 
 defineClosure :: Closure -> Construct ()
@@ -362,9 +362,10 @@ compile Program { closures, blocks } = runConstruct $ do
 
   forM_ [closure | (_, closure) <- closures] defineClosure
   forM_ [block | (_, block) <- blocks] defineBlock
-  
-  declareFunc "_start" [] []
+
+  declareFunc "_start" [] [i32]
   startCode
   pushCall "_block_start"
-  pushCall "leave"
+  pushCall "trunk"
+  pushI32Load MemArg { alignment = 2, offset = 0 }
   endCode

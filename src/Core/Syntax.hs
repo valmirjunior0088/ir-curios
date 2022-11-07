@@ -3,6 +3,9 @@ module Core.Syntax
   , unwrap
   , Scope
   , unbound
+  , PrimitiveType (..)
+  , Primitive (..)
+  , Operation (..)
   , Type
   , Term (..)
   , Walk
@@ -14,6 +17,7 @@ module Core.Syntax
   where
 
 import Data.List (nub)
+import Data.Int (Int32)
 import Control.Monad.Reader (Reader, runReader, asks, local)
 
 data Variable =
@@ -37,6 +41,21 @@ instance Eq a => Eq (Scope a) where
 unbound :: a -> Scope a
 unbound = Scope
 
+data PrimitiveType =
+  Int32Type |
+  Flt32Type
+  deriving (Show, Eq)
+
+data Primitive =
+  Int32 Int32 |
+  Flt32 Float
+  deriving (Show, Eq)
+
+data Operation =
+  Int32Add |
+  Flt32Add
+  deriving (Show, Eq)
+
 type Type = Term
 
 data Term =
@@ -52,10 +71,14 @@ data Term =
   PairType Type (Scope Type) |
   Pair Term Term |
   Split Term (Scope (Scope Term)) |
-  
+
   LabelType [String] |
   Label String |
-  Match Term [(String, Term)]
+  Match Term [(String, Term)] |
+
+  PrimitiveType PrimitiveType |
+  Primitive Primitive |
+  Operate Operation [Term]
   deriving (Show, Eq)
 
 type Depth = Reader Int
@@ -68,7 +91,7 @@ with action subject = runReader (walk go subject) 0 where
   go variable = asks action <*> pure variable
 
 instance Walk Term where
-  walk action = \case 
+  walk action = \case
     Global name -> pure (Global name)
     Local variable -> action variable
     Type -> pure Type
@@ -81,6 +104,9 @@ instance Walk Term where
     LabelType set -> pure (LabelType set)
     Label label -> pure (Label label)
     Match scrutinee branches -> Match <$> walk action scrutinee <*> mapM (mapM $ walk action) branches
+    PrimitiveType primitiveType -> pure (PrimitiveType primitiveType)
+    Primitive primitive -> pure (Primitive primitive)
+    Operate operation parameters -> Operate operation <$> mapM (walk action) parameters
 
 instance Walk a => Walk (Scope a) where
   walk action (Scope scope) = Scope <$> local succ (walk action scope)
@@ -101,7 +127,7 @@ open :: Walk a => String -> Scope a -> a
 open name = instantiate (Local $ Free name)
 
 free :: Term -> [String]
-free = \case 
+free = \case
   Global _ -> []
   Local (Free name) -> [name]
   Local _ -> []
@@ -115,3 +141,6 @@ free = \case
   LabelType _ -> []
   Label _ -> []
   Match scrutinee branches -> nub (free scrutinee ++ concatMap (free . snd) branches)
+  PrimitiveType _ -> []
+  Primitive _ -> []
+  Operate _ parameters -> nub (concatMap free parameters)

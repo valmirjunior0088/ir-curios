@@ -3,17 +3,47 @@ module Core.Parse
   )
   where
 
+import Core.Syntax
+  ( Variable (..)
+  , Scope
+  , unbound
+  , PrimitiveType (..)
+  , Primitive (..)
+  , Operation (..)
+  , Term (..)
+  , Walk
+  , abstract
+  )
+
+import Text.Megaparsec
+  ( ParsecT
+  , runParserT
+  , some
+  , someTill
+  , manyTill
+  , try
+  , oneOf
+  , (<|>)
+  , eof
+  , single
+  , optional
+  )
+
+import Text.Megaparsec.Char.Lexer
+  ( space
+  , skipLineComment
+  , skipBlockComment
+  , lexeme
+  , symbol
+  , decimal
+  , float
+  )
+
 import Data.Void (Void)
 import Data.Functor ((<&>))
-import Text.Megaparsec (ParsecT, runParserT, some, someTill, manyTill, try, oneOf, (<|>), eof, single)
 import Text.Megaparsec.Error (ParseErrorBundle, errorBundlePretty)
 import Text.Megaparsec.Char (space1)
-import Text.Megaparsec.Char.Lexer (space, skipLineComment, skipBlockComment, lexeme, symbol)
 import Control.Monad.Reader (MonadReader (..), Reader, runReader, asks)
-
-import Core.Syntax (Variable (..), Scope, unbound, Term, Walk, abstract)
-import qualified Core.Syntax as Syntax
-
 import Core.Program (Entry (..), Program (..))
 
 type Parse = ParsecT Void String (Reader [String])
@@ -40,17 +70,17 @@ parseSplit = do
   left <- parseSymbol "|" *> parseIdentifier
   right <- parseSymbol "," *> parseIdentifier <* parseSymbol "|"
   body <- parseScope left (parseScope right (parseTerm "}"))
-  return (Syntax.Split scrutinee body)
+  return (Split scrutinee body)
 
 parseLabelType :: Parse Term
 parseLabelType = do
   labels <- parseSymbol "{" *> manyTill parseIdentifier (parseSymbol "}")
-  return (Syntax.LabelType labels)
+  return (LabelType labels)
 
 parseLabel :: Parse Term
 parseLabel = do
   label <- single ':' *> parseIdentifier
-  return (Syntax.Label label)
+  return (Label label)
 
 parseBranch :: Parse (String, Term)
 parseBranch = do
@@ -62,7 +92,7 @@ parseMatch :: Parse Term
 parseMatch = do
   scrutinee <- parseSymbol "match " *> parseTerm "{"
   branches <- manyTill parseBranch (parseSymbol "}")
-  return (Syntax.Match scrutinee branches)
+  return (Match scrutinee branches)
 
 parseParens :: Parse Term
 parseParens = parseSymbol "(" *> parseTerm ")"
@@ -78,24 +108,55 @@ parseUnboundScope parser = unbound <$> parser
 parseName :: Parse Term
 parseName = parseIdentifier >>= \case
   "Type" ->
-    return Syntax.Type
+    return Type
+
+  "Int32" ->
+    return (PrimitiveType Int32Type)
+
+  "Flt32" ->
+    return (PrimitiveType Flt32Type)
 
   identifier -> asks (elem identifier) <&> \case
-    True -> Syntax.Local (Free identifier)
-    False -> Syntax.Global identifier
+    True -> Local (Free identifier)
+    False -> Global identifier
+
+parseInt :: Parse Primitive
+parseInt = positive <|> negative where
+  positive = Int32 <$> (optional (single '+') *> decimal)
+  negative = Int32 <$> (single '-' *> (negate <$> decimal))
+
+parseFloat :: Parse Primitive
+parseFloat = positive <|> negative where
+  positive = Flt32 <$> (optional (single '+') *> float)
+  negative = Flt32 <$> (single '-' *> (negate <$> float))
+
+parsePrimitive :: Parse Term
+parsePrimitive = Primitive <$> parseLexeme (parseInt <|> parseFloat)
+
+parseOperation :: Parse Operation
+parseOperation =
+  Int32Add <$ parseSymbol "int32.add" <|> Flt32Add <$ parseSymbol "flt32.add"
+
+parseOperate :: Parse Term
+parseOperate = do
+  operation <- try (parseSymbol "[" *> parseOperation)
+  parameters <- someTill parseClosed (parseSymbol "]")
+  return (Operate operation parameters)
 
 parseClosed :: Parse Term
 parseClosed = try parseSplit
   <|> try parseLabelType
   <|> try parseLabel
   <|> try parseMatch
+  <|> try parsePrimitive
+  <|> try parseOperate
   <|> try parseParens
   <|> parseName
 
 parseApply :: String -> Parse Term
 parseApply boundary = do
   terms <- someTill parseClosed (parseSymbol boundary)
-  return (foldl1 Syntax.Apply terms)
+  return (foldl1 Apply terms)
 
 parsePairType :: String -> Parse Term
 parsePairType boundary = try parser <|> parseApply boundary where
@@ -103,12 +164,12 @@ parsePairType boundary = try parser <|> parseApply boundary where
     identifier <- parseSymbol "(" *> parseIdentifier
     input <- parseSymbol ":" *> parseTerm ")" <* parseSymbol "*>"
     scope <- parseScope identifier (parsePairType boundary)
-    return (Syntax.PairType input scope)
+    return (PairType input scope)
 
   parseNonDependent = do
     input <- parseApply "*>"
     scope <- parseUnboundScope (parsePairType boundary)
-    return (Syntax.PairType input scope)
+    return (PairType input scope)
 
   parser = try parseDependent <|> parseNonDependent
 
@@ -117,7 +178,7 @@ parsePair boundary = try parser <|> parseApply boundary where
   parser = do
     left <- parseApply ","
     right <- parsePair boundary
-    return (Syntax.Pair left right)
+    return (Pair left right)
 
 parseFunctionType :: String -> Parse Term
 parseFunctionType boundary = try parser <|> parseApply boundary where
@@ -125,12 +186,12 @@ parseFunctionType boundary = try parser <|> parseApply boundary where
     identifier <- parseSymbol "(" *> parseIdentifier
     input <- parseSymbol ":" *> parseTerm ")" <* parseSymbol "->"
     scope <- parseScope identifier (parseFunctionType boundary)
-    return (Syntax.FunctionType input scope)
+    return (FunctionType input scope)
 
   parseNonDependent = do
     input <- parseApply "->"
     scope <- parseUnboundScope (parseFunctionType boundary)
-    return (Syntax.FunctionType input scope)
+    return (FunctionType input scope)
 
   parser = try parseDependent <|> parseNonDependent
 
@@ -139,8 +200,8 @@ parseFunction boundary = try parser <|> fallback where
   parser = do
     identifier <- parseIdentifier <* parseSymbol "=>"
     body <- parseScope identifier (parseFunction boundary)
-    return (Syntax.Function body)
-  
+    return (Function body)
+
   fallback = try (parseFunctionType boundary)
     <|> try (parsePair boundary)
     <|> parsePairType boundary
